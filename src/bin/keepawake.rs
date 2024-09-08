@@ -52,7 +52,21 @@ async fn supervisor(active_connections: Arc<AtomicU64>, ac_notify: Arc<Notify>, 
 
             // Double-check active connections after waiting to avoid a race condition
             if active_connections.load(Ordering::SeqCst) == 0 {
-                println!("releasing wakelock");
+                if let Some(awake) = _awake {
+                    println!("releasing wakelock");
+                    drop(awake);
+                    // we have to do this cause there's a bug in keepawake
+                    _awake = Some(keepawake::Builder::default()
+                        .display(false)
+                        .idle(false)
+                        .sleep(false)
+                        .reason("no active TCP proxy connection")
+                        .app_reverse_domain("pw.karel.wol-proxy")
+                        .create()?);
+                    // calls the drop code, probably?
+                    drop(_awake);
+                    _awake = None;
+                }
                 _awake = None;  // Release wakelock
             }
         }
