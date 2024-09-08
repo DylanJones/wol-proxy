@@ -9,4 +9,6 @@ edition = "2021"
 anyhow = "1.0.87"
 clap = { version = "4.5.17", features = ["derive"] }
 keepawake = "0.5.1"
+ping-rs = "0.1.2"
 tokio = { version = "1.40.0", features = ["rt-multi-thread", "io-util", "macros", "time", "net", "sync"] }
+wake-on-lan = "0.2.0"
