@@ -97,7 +97,7 @@ fn parse_mac(mac: &str) -> Result<[u8; 6]> {
     Ok(out)
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args = Args::parse();
 

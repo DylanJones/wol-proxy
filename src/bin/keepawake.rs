@@ -22,7 +22,7 @@ struct Args {
     /// Listen address to bind to
     bind: String,
 
-    #[clap(long, default_value = "15")]
+    #[clap(long, default_value = "300")]
     /// Number of seconds to keep the wake lock active after the last
     /// connection is closed
     timeout: u64
@@ -31,12 +31,13 @@ struct Args {
 /// Supervisor thread that waits for the last connection to close.
 async fn supervisor(active_connections: Arc<AtomicU64>, ac_notify: Arc<Notify>, timeout: Duration) -> Result<()> {
     let mut _awake: Option<KeepAwake> = None;
+    let mut locked = false;
     loop {
         // Wait for notification of a state change
         ac_notify.notified().await;
         // If there are active connections, ensure the wakelock is held
         if active_connections.load(Ordering::SeqCst) > 0 {
-            if _awake.is_none() {
+            if !locked {
                 println!("acquiring wakelock");
                 _awake = Some(keepawake::Builder::default()
                     .display(false)
@@ -45,29 +46,39 @@ async fn supervisor(active_connections: Arc<AtomicU64>, ac_notify: Arc<Notify>, 
                     .reason("active TCP proxy connection")
                     .app_reverse_domain("pw.karel.wol-proxy")
                     .create()?);
+                locked = true;
             }
         } else {
             // No active connections, wait for the timeout before releasing the wakelock
-            tokio::time::sleep(timeout).await;
+            tokio::select! {
+                _ = tokio::time::sleep(timeout) => (),
+                _ = ac_notify.notified() => ()
+            };
 
             // Double-check active connections after waiting to avoid a race condition
             if active_connections.load(Ordering::SeqCst) == 0 {
-                if let Some(awake) = _awake {
+                if locked {
                     println!("releasing wakelock");
-                    drop(awake);
                     // we have to do this cause there's a bug in keepawake
-                    _awake = Some(keepawake::Builder::default()
-                        .display(false)
-                        .idle(false)
-                        .sleep(false)
-                        .reason("no active TCP proxy connection")
-                        .app_reverse_domain("pw.karel.wol-proxy")
-                        .create()?);
-                    // calls the drop code, probably?
                     drop(_awake);
                     _awake = None;
+                    // _awake = Some(keepawake::Builder::default()
+                    //     .display(false)
+                    //     .idle(false)
+                    //     .sleep(false)
+                    //     .reason("no active TCP proxy connection")
+                    //     .app_reverse_domain("pw.karel.wol-proxy")
+                    //     .create()?);
+                    // drop(_awake);
+                    // _awake = Some(keepawake::Builder::default()
+                    //     .display(false)
+                    //     .idle(false)
+                    //     .sleep(false)
+                    //     .reason("no active TCP proxy connection")
+                    //     .app_reverse_domain("pw.karel.wol-proxy")
+                    //     .create()?);
+                    locked = false;
                 }
-                _awake = None;  // Release wakelock
             }
         }
     }
@@ -79,7 +90,7 @@ async fn handle_client(mut stream: TcpStream, target_addr: &SocketAddr) -> Resul
     Ok(())
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // parse command line arguments
     let args = Args::parse();
@@ -89,6 +100,8 @@ async fn main() -> Result<()> {
     let active_connections = Arc::new(AtomicU64::new(0));
 
     // Spawn supervisor thread to manage wakelock
+    // (must be on its own thread bc of how wakelocks work)
+    // let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     tokio::spawn(supervisor(active_connections.clone(), notify.clone(), Duration::from_secs(args.timeout)));
 
     // main server loop: accept new connections and forward them to the target
