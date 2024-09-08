@@ -5,7 +5,7 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use ping_rs::PingOptions;
 use std::{
-    net::{SocketAddr, SocketAddrV4},
+    net::{IpAddr, SocketAddr, SocketAddrV4},
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -32,39 +32,52 @@ struct Args {
     timeout: u64,
 }
 
+/// Wait for the target to come online, timing out after the given
+/// timeout.
+async fn ping(target: &IpAddr, timeout: Duration) -> bool {
+    let ping_opts = PingOptions {
+        ttl: 128,
+        dont_fragment: true,
+    };
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() > timeout {
+            return false;
+        }
+        match ping_rs::send_ping_async(
+            target,
+            Duration::from_secs(1),
+            Arc::new(&[0u8; 0]),
+            Some(&ping_opts),
+        )
+        .await
+        {
+            Ok(_) => return true,
+            Err(_) => (),
+        };
+    }
+}
+
 async fn handle_client(
     mut stream: TcpStream,
     target_addr: &SocketAddr,
     mac: &[u8; 6],
     timeout: u64,
 ) -> Result<()> {
-    // Send the wake-on-lan packet to the server
-    let pkt = wake_on_lan::MagicPacket::new(mac);
-    let sa_any = SocketAddr::from_str("[::]:0").unwrap();
-    println!("Sending magic packet...");
-    pkt.send_to(target_addr, &sa_any.try_into()?)?;
+    // Check if the server is already online, and skip WOL if it is:
+    if !ping(&target_addr.ip(), Duration::from_secs(1)).await {
+        // Send the wake-on-lan packet to the server
+        let pkt = wake_on_lan::MagicPacket::new(mac);
+        let sa_any = SocketAddr::from_str("[::]:0").unwrap();
+        println!("Sending magic packet...");
+        pkt.send_to(target_addr, &sa_any.try_into()?)?;
 
-    // Wait for the server to wake up
-    let ping_opts = PingOptions {
-        ttl: 128,
-        dont_fragment: true,
-    };
-    println!("Waiting for server to wake up...");
-    match ping_rs::send_ping_async(
-        &target_addr.ip(),
-        Duration::from_secs(timeout),
-        Arc::new(&[0u8; 0]),
-        Some(&ping_opts),
-    )
-    .await
-    {
-        Ok(_) => {}
-        Err(e) => bail!(
-            "Server failed to come online after {} seconds ({:?})",
-            timeout,
-            e
-        ),
-    };
+        // Wait for the server to wake up
+        println!("Waiting for server to wake up...");
+        if !ping(&target_addr.ip(), Duration::from_secs(timeout)).await {
+            bail!("Server did not wake up in time");
+        }
+    }
 
     // Proxy the connection to the server
     println!("Proxying connection to server...");
