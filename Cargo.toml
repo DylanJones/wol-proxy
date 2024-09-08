@@ -1,0 +1,12 @@
+[package]
+name = "wol-proxy"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.87"
+clap = { version = "4.5.17", features = ["derive"] }
+keepawake = "0.5.1"
+tokio = { version = "1.40.0", features = ["rt-multi-thread", "io-util", "macros", "time", "net", "sync"] }
