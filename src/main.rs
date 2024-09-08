@@ -22,7 +22,7 @@ struct Args {
     /// Listen address to bind to
     bind: String,
 
-    #[clap(short, long, default_value = "15")]
+    #[clap(long, default_value = "15")]
     /// Number of seconds to keep the wake lock active after the last
     /// connection is closed
     timeout: u64
@@ -37,13 +37,14 @@ async fn supervisor(active_connections: Arc<AtomicU64>, ac_notify: Arc<Notify>, 
         // If there are active connections, ensure the wakelock is held
         if active_connections.load(Ordering::SeqCst) > 0 {
             if _awake.is_none() {
-            _awake = Some(keepawake::Builder::default()
-                .display(false)
-                .idle(true)
-                .sleep(true)
-                .reason("active TCP proxy connection")
-                .app_reverse_domain("pw.karel.wol-proxy")
-                .create()?);
+                println!("acquiring wakelock");
+                _awake = Some(keepawake::Builder::default()
+                    .display(false)
+                    .idle(true)
+                    .sleep(true)
+                    .reason("active TCP proxy connection")
+                    .app_reverse_domain("pw.karel.wol-proxy")
+                    .create()?);
             }
         } else {
             // No active connections, wait for the timeout before releasing the wakelock
@@ -51,6 +52,7 @@ async fn supervisor(active_connections: Arc<AtomicU64>, ac_notify: Arc<Notify>, 
 
             // Double-check active connections after waiting to avoid a race condition
             if active_connections.load(Ordering::SeqCst) == 0 {
+                println!("releasing wakelock");
                 _awake = None;  // Release wakelock
             }
         }
