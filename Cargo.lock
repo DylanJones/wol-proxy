@@ -1106,6 +1106,7 @@ dependencies = [
  "anyhow",
  "embedded-hal 0.2.7",
  "embedded-svc",
+ "embuild",
  "env_logger",
  "esp-idf-hal",
  "esp-idf-svc",
