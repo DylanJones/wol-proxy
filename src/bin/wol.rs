@@ -11,9 +11,9 @@ use std::{
     time::Duration,
 };
 use tokio::net::{TcpListener, TcpStream};
-use wake_on_lan;
 
 #[derive(Parser)]
+#[command(version, about = "Wake-on-LAN TCP proxy")]
 struct Args {
     #[clap(short, long)]
     /// The MAC address of the server
@@ -44,17 +44,17 @@ async fn ping(target: &IpAddr, timeout: Duration) -> bool {
         if start.elapsed() > timeout {
             return false;
         }
-        match ping_rs::send_ping_async(
+        if ping_rs::send_ping_async(
             target,
             Duration::from_secs(1),
             Arc::new(&[0u8; 0]),
             Some(&ping_opts),
         )
         .await
+        .is_ok()
         {
-            Ok(_) => return true,
-            Err(_) => (),
-        };
+            return true;
+        }
     }
 }
 
@@ -70,7 +70,7 @@ async fn handle_client(
         let pkt = wake_on_lan::MagicPacket::new(mac);
         let sa_any = SocketAddr::from_str("[::]:0").unwrap();
         println!("Sending magic packet...");
-        pkt.send_to(target_addr, &sa_any.try_into()?)?;
+        pkt.send_to(target_addr, &sa_any)?;
 
         // Wait for the server to wake up
         println!("Waiting for server to wake up...");
@@ -90,9 +90,28 @@ async fn handle_client(
 
 /// Parse a MAC address into a [u8; 6]
 fn parse_mac(mac: &str) -> Result<[u8; 6]> {
+    // Check basic format: should be XX:XX:XX:XX:XX:XX (17 characters)
+    if mac.len() != 17 {
+        bail!("MAC address must be in format XX:XX:XX:XX:XX:XX");
+    }
+
+    // Split by colons and verify we have exactly 6 parts
+    let parts: Vec<&str> = mac.split(':').collect();
+    if parts.len() != 6 {
+        bail!("MAC address must have exactly 6 hexadecimal parts separated by colons");
+    }
+
     let mut out = [0u8; 6];
-    for i in 0..6 {
-        out[i] = u8::from_str_radix(&mac[3 * i..(3 * i) + 2], 16)?;
+    for (i, part) in parts.iter().enumerate() {
+        // Each part should be exactly 2 characters
+        if part.len() != 2 {
+            bail!("Each MAC address part must be exactly 2 hexadecimal characters");
+        }
+
+        // Parse as hexadecimal
+        out[i] = u8::from_str_radix(part, 16).map_err(|_| {
+            anyhow::anyhow!("Invalid hexadecimal characters in MAC address: {}", part)
+        })?;
     }
     Ok(out)
 }
@@ -116,5 +135,113 @@ async fn main() -> Result<()> {
                 Err(e) => eprintln!("client handling error: {}", e),
             };
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_mac_valid() {
+        // Test with valid MAC address
+        let result = parse_mac("aa:bb:cc:dd:ee:ff");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+    }
+
+    #[test]
+    fn test_parse_mac_uppercase() {
+        // Test with uppercase MAC address
+        let result = parse_mac("AA:BB:CC:DD:EE:FF");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+    }
+
+    #[test]
+    fn test_parse_mac_mixed_case() {
+        // Test with mixed case MAC address
+        let result = parse_mac("aA:Bb:cC:Dd:eE:fF");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+    }
+
+    #[test]
+    fn test_parse_mac_zeros() {
+        // Test with all zeros
+        let result = parse_mac("00:00:00:00:00:00");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), [0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn test_parse_mac_max_values() {
+        // Test with maximum hex values
+        let result = parse_mac("ff:ff:ff:ff:ff:ff");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn test_parse_mac_invalid_too_short() {
+        // Test with too short MAC address
+        let result = parse_mac("aa:bb:cc:dd:ee");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_invalid_too_long() {
+        // Test with too long MAC address
+        let result = parse_mac("aa:bb:cc:dd:ee:ff:gg");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_invalid_chars() {
+        // Test with invalid characters
+        let result = parse_mac("zz:bb:cc:dd:ee:ff");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_wrong_format() {
+        // Test with wrong separator
+        let result = parse_mac("aa-bb-cc-dd-ee-ff");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_missing_separator() {
+        // Test with missing separators
+        let result = parse_mac("aabbccddeeff");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_empty() {
+        // Test with empty string
+        let result = parse_mac("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_single_digit() {
+        // Test with single digit components
+        let result = parse_mac("a:b:c:d:e:f");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_with_extra_colons() {
+        // Test with extra colons
+        let result = parse_mac("aa:bb:cc:dd:ee:ff:");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_mac_three_digit_parts() {
+        // Test with three digit parts
+        let result = parse_mac("aaa:bb:cc:dd:ee:ff");
+        assert!(result.is_err());
     }
 }
