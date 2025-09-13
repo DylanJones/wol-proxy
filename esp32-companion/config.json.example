@@ -1,0 +1,11 @@
+// ESP32-S2 Companion Configuration
+// Create this file and configure your Wi-Fi credentials
+{
+    "wifi": {
+        "ssid": "YOUR_WIFI_SSID",
+        "password": "YOUR_WIFI_PASSWORD"
+    },
+    "wake": {
+        "udp_port": 9999
+    }
+}

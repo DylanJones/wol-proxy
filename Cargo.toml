@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "esp32-companion"]
+
 [package]
 name = "wol-proxy"
 version = "0.1.0"

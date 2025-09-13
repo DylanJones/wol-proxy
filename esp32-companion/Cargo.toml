@@ -1,0 +1,36 @@
+[package]
+name = "esp32-companion"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# For testing on non-ESP32 platforms
+[target.'cfg(not(target_os = "espidf"))'.dependencies]
+env_logger = "0.10"
+
+# Note: ESP32-specific dependencies would be added here for actual ESP32-S2 compilation
+[target.'cfg(target_os = "espidf")'.dependencies]
+embedded-svc = { version = "0.26", default-features = false }
+esp-idf-svc = { version = "0.47", default-features = false }
+esp-idf-sys = { version = "0.33" }
+
+[build-dependencies]
+# embuild would be used for ESP32 builds
+# embuild = "0.31"
+
+[[bin]]
+name = "esp32-companion"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = 1
+overflow-checks = true

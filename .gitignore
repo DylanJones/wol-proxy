@@ -1,1 +1,3 @@
 /target
+# ESP32 companion configuration with Wi-Fi credentials
+esp32-companion/config.json

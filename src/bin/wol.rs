@@ -6,7 +6,7 @@ use anyhow::{bail, Result};
 use clap::Parser;
 use ping_rs::PingOptions;
 use std::{
-    net::{IpAddr, SocketAddr, SocketAddrV4},
+    net::{IpAddr, SocketAddr, SocketAddrV4, UdpSocket},
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -31,6 +31,18 @@ struct Args {
     #[clap(long, default_value = "15")]
     /// Maximum time to wait for the server to wake up in seconds
     timeout: u64,
+
+    #[clap(long)]
+    /// ESP32-S2 companion IP address for alternate wake method
+    esp32_ip: Option<String>,
+
+    #[clap(long, default_value = "9999")]
+    /// ESP32-S2 companion UDP port for wake commands
+    esp32_port: u16,
+
+    #[clap(long)]
+    /// Use ESP32-S2 companion for wake instead of traditional WOL
+    esp32_only: bool,
 }
 
 /// Wait for the target to come online, timing out after the given
@@ -61,19 +73,65 @@ async fn ping(target: &IpAddr, timeout: Duration) -> bool {
     }
 }
 
+/// Send wake command to ESP32-S2 companion device
+fn wake_esp32(esp32_addr: &str, esp32_port: u16) -> Result<()> {
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    
+    let esp32_socket_addr = format!("{}:{}", esp32_addr, esp32_port);
+    println!("Sending wake command to ESP32-S2 at {}", esp32_socket_addr);
+    
+    // Send a simple wake command packet
+    let wake_packet = b"WAKE";
+    socket.send_to(wake_packet, &esp32_socket_addr)?;
+    
+    // Optionally wait for acknowledgment
+    let mut buf = [0; 64];
+    match socket.recv(&mut buf) {
+        Ok(_) => println!("ESP32-S2 acknowledged wake command"),
+        Err(_) => println!("ESP32-S2 wake command sent (no acknowledgment received)"),
+    }
+    
+    Ok(())
+}
+
 async fn handle_client(
     mut stream: TcpStream,
     target_addr: &SocketAddr,
     mac: &[u8; 6],
     timeout: u64,
+    esp32_config: Option<(&str, u16)>,
+    esp32_only: bool,
 ) -> Result<()> {
-    // Check if the server is already online, and skip WOL if it is:
+    // Check if the server is already online, and skip wake if it is:
     if !ping(&target_addr.ip(), Duration::from_secs(1)).await {
-        // Send the wake-on-lan packet to the server
-        let pkt = MagicPacket::new(mac);
-        let sa_any = SocketAddr::from_str("[::]:0").unwrap();
-        println!("Sending magic packet...");
-        pkt.send_to(target_addr, &sa_any)?;
+        // Choose wake method based on configuration
+        if let Some((esp32_ip, esp32_port)) = esp32_config {
+            if esp32_only {
+                // Use ESP32-S2 only
+                println!("Using ESP32-S2 companion for wake...");
+                wake_esp32(esp32_ip, esp32_port)?;
+            } else {
+                // Try ESP32-S2 first, fall back to traditional WOL
+                println!("Trying ESP32-S2 companion first...");
+                if let Err(e) = wake_esp32(esp32_ip, esp32_port) {
+                    println!("ESP32-S2 wake failed: {}, falling back to WOL", e);
+                    let pkt = MagicPacket::new(mac);
+                    let sa_any = SocketAddr::from_str("[::]:0").unwrap();
+                    println!("Sending magic packet...");
+                    pkt.send_to(target_addr, &sa_any)?;
+                } else {
+                    println!("ESP32-S2 wake command sent successfully");
+                }
+            }
+        } else {
+            // Traditional WOL only
+            let pkt = MagicPacket::new(mac);
+            let sa_any = SocketAddr::from_str("[::]:0").unwrap();
+            println!("Sending magic packet...");
+            pkt.send_to(target_addr, &sa_any)?;
+        }
 
         // Wait for the server to wake up
         println!("Waiting for server to wake up...");
@@ -163,7 +221,8 @@ mod tests {
             let (stream, _) = proxy.accept().await.unwrap();
             let mac = [0, 1, 2, 3, 4, 5];
             // Use a short timeout since we're testing locally
-            if let Err(e) = handle_client(stream, &echo_addr, &mac, 1).await {
+            // No ESP32-S2 configuration for this test
+            if let Err(e) = handle_client(stream, &echo_addr, &mac, 1, None, false).await {
                 eprintln!("Handle client error: {}", e);
                 // For CI environments where ping might not work, we expect this to fail
                 // but we can still test that the function handles errors gracefully
@@ -191,6 +250,15 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_wake_esp32_function() {
+        // Test that the ESP32 wake function works properly
+        // It should succeed even if no ESP32-S2 is listening (just sends UDP packet)
+        let result = wake_esp32("127.0.0.1", 9999);
+        // This should succeed because UDP is connectionless
+        assert!(result.is_ok());
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -203,11 +271,34 @@ async fn main() -> Result<()> {
     // split target address into ip/port:
     let target_addr = SocketAddrV4::from_str(&args.target)?;
 
+    // Prepare ESP32-S2 configuration (clone to avoid lifetime issues)
+    let esp32_config = args.esp32_ip.clone().map(|ip| (ip, args.esp32_port));
+    let esp32_only = args.esp32_only;
+
+    // Validate configuration
+    if esp32_only && esp32_config.is_none() {
+        bail!("ESP32-only mode requires --esp32-ip to be specified");
+    }
+
+    if let Some((ref esp32_ip, esp32_port)) = esp32_config {
+        println!("ESP32-S2 companion configured at {}:{}", esp32_ip, esp32_port);
+        if esp32_only {
+            println!("Using ESP32-S2 companion ONLY for wake functionality");
+        } else {
+            println!("Using ESP32-S2 companion with WOL fallback");
+        }
+    } else {
+        println!("Using traditional Wake-on-LAN only");
+    }
+
     let listener = TcpListener::bind(&args.bind).await?;
+    let timeout = args.timeout; // Move timeout out to avoid borrow issues
     loop {
         let (stream, _) = listener.accept().await?;
+        let esp32_config_clone = esp32_config.clone();
         tokio::spawn(async move {
-            match handle_client(stream, &target_addr.into(), &mac, args.timeout).await {
+            let esp32_config_ref = esp32_config_clone.as_ref().map(|(ip, port)| (ip.as_str(), *port));
+            match handle_client(stream, &target_addr.into(), &mac, timeout, esp32_config_ref, esp32_only).await {
                 Ok(_) => {}
                 Err(e) => eprintln!("client handling error: {}", e),
             };
