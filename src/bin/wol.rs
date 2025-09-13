@@ -97,6 +97,61 @@ fn parse_mac(mac: &str) -> Result<[u8; 6]> {
     Ok(out)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    #[test]
+    fn parse_mac_parses_bytes() {
+        let mac = parse_mac("aa:bb:cc:dd:ee:ff").unwrap();
+        assert_eq!(mac, [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+    }
+
+    #[test]
+    fn parse_mac_rejects_invalid() {
+        assert!(parse_mac("not a mac").is_err());
+    }
+
+    #[tokio::test]
+    async fn ping_localhost_succeeds() {
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(ping(&ip, Duration::from_secs(1)).await);
+    }
+
+    #[tokio::test]
+    async fn handle_client_proxies_data() {
+        // Start echo server that will act as the real target
+        let echo = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let echo_addr = echo.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = echo.accept().await.unwrap();
+            let mut buf = [0u8; 32];
+            let n = stream.read(&mut buf).await.unwrap();
+            stream.write_all(&buf[..n]).await.unwrap();
+        });
+
+        // Start listener representing the proxy and spawn handle_client
+        let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = proxy.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = proxy.accept().await.unwrap();
+            let mac = [0, 1, 2, 3, 4, 5];
+            handle_client(stream, &echo_addr, &mac, 1).await.unwrap();
+        });
+
+        // Client connects to proxy and ensures data is echoed back
+        let mut client = TcpStream::connect(proxy_addr).await.unwrap();
+        client.write_all(b"ping").await.unwrap();
+        let mut buf = [0u8; 4];
+        client.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"ping");
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let args = Args::parse();
