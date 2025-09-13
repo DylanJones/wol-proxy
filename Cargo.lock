@@ -1104,6 +1104,7 @@ name = "esp32-companion"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "embedded-hal 0.2.7",
  "embedded-svc",
  "env_logger",
  "esp-idf-hal",
@@ -1112,6 +1113,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "usb-device",
  "usbd-hid",
 ]
 
