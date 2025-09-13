@@ -46,6 +46,25 @@ cargo build --release
 
 The compiled binaries can be found in `target/release/`.
 
+### Cross-compilation
+
+The project supports cross-compilation for multiple platforms. Statically linked
+binaries for aarch64 Linux and amd64 Windows are automatically built and
+published via CI/CD.
+
+To build for specific targets locally:
+
+```bash
+# Install cross-compilation tool
+cargo install cross
+
+# Build for aarch64 Linux (statically linked)
+cross build --target aarch64-unknown-linux-musl --release
+
+# Build for amd64 Windows
+cross build --target x86_64-pc-windows-gnu --release
+```
+
 ## Testing
 
 The repository contains unit and integration tests covering the proxying
@@ -54,6 +73,20 @@ utilities. Run all tests with:
 ```bash
 cargo test
 ```
+
+**Note**: Tests are required to pass before code can be merged. The CI pipeline
+runs both tests and clippy checks on all pull requests.
+
+## CI/CD
+
+The project uses GitHub Actions for continuous integration and deployment:
+
+- **Tests**: All unit and integration tests must pass
+- **Linting**: Code must pass `cargo clippy` without warnings
+- **Cross-compilation**: Automatically builds statically linked binaries for:
+  - `aarch64-unknown-linux-musl` (ARM64 Linux)
+  - `x86_64-pc-windows-gnu` (AMD64 Windows)
+- **Artifacts**: Built binaries are published as artifacts on the main branch
 
 ## License
 
