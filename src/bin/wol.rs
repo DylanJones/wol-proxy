@@ -1,6 +1,8 @@
 //! A simple program to intercept incoming TCP connections and send a
 //! wake-on-lan packet to the real server, then transparently proxy once
 //! the server has woken up.
+#![allow(clippy::single_component_path_imports)]
+
 use anyhow::{bail, Result};
 use clap::Parser;
 use ping_rs::PingOptions;
@@ -44,17 +46,17 @@ async fn ping(target: &IpAddr, timeout: Duration) -> bool {
         if start.elapsed() > timeout {
             return false;
         }
-        match ping_rs::send_ping_async(
+        if ping_rs::send_ping_async(
             target,
             Duration::from_secs(1),
             Arc::new(&[0u8; 0]),
             Some(&ping_opts),
         )
         .await
+        .is_ok()
         {
-            Ok(_) => return true,
-            Err(_) => (),
-        };
+            return true;
+        }
     }
 }
 
@@ -70,7 +72,7 @@ async fn handle_client(
         let pkt = wake_on_lan::MagicPacket::new(mac);
         let sa_any = SocketAddr::from_str("[::]:0").unwrap();
         println!("Sending magic packet...");
-        pkt.send_to(target_addr, &sa_any.try_into()?)?;
+        pkt.send_to(target_addr, &sa_any)?;
 
         // Wait for the server to wake up
         println!("Waiting for server to wake up...");
