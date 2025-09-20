@@ -1,13 +1,6 @@
 source "Kconfig.zephyr"
 
-menu "WOL Proxy Companion"
-
-config WOL_LISTEN_PORT
-    int "UDP port to trigger wake"
-    range 1 65535
-    default 3389
-    help
-      UDP port number that the firmware listens on for wake packets.
+menu "Matter WOL Companion"
 
 config WOL_USB_MAX_LINE
     int "Maximum bytes per CDC command"
@@ -16,5 +9,32 @@ config WOL_USB_MAX_LINE
     help
       Maximum number of bytes buffered from the USB CDC console before
       the command processor attempts to parse a line.
+
+config MATTER_SETUP_PIN_CODE
+    int "Matter setup PIN code"
+    range 1 99999999
+    default 12345678
+    help
+      8-digit PIN code for Matter device commissioning.
+
+config MATTER_SETUP_DISCRIMINATOR  
+    int "Matter setup discriminator"
+    range 0 4095
+    default 3840
+    help
+      12-bit discriminator for Matter device commissioning.
+
+config MATTER_VENDOR_ID
+    hex "Matter vendor ID"
+    default 0xFFF1
+    help
+      16-bit vendor ID for Matter device identification.
+      0xFFF1 is reserved for testing.
+
+config MATTER_PRODUCT_ID
+    hex "Matter product ID"  
+    default 0x8000
+    help
+      16-bit product ID for Matter device identification.
 
 endmenu

@@ -1,3 +1,7 @@
 .platformio-data
 .pio
 .platformio
+build/
+third_party/
+*.bak
+*.log
