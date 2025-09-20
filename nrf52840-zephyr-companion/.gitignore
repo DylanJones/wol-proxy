@@ -1,0 +1,14 @@
+# PlatformIO build artifacts
+.pio/
+.vscode/
+
+# Build artifacts
+build/
+*.elf
+*.bin
+*.hex
+*.map
+
+# Temporary files
+*.tmp
+*.log

@@ -5,3 +5,6 @@
 **/*/target
 build/
 build.log
+# PlatformIO build artifacts
+.pio/
+.vscode/

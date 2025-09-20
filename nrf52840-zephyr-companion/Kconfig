@@ -1,3 +1,7 @@
+# DEPRECATED: This file was used with the west build system.
+# For PlatformIO builds, configuration is handled via zephyr/prj.conf
+# This file is kept for reference and compatibility.
+
 source "Kconfig.zephyr"
 
 menu "WOL Proxy Companion"

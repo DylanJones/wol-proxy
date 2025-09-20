@@ -1,7 +1,6 @@
 /*
- * DEPRECATED: This file was used with the west build system.
- * For PlatformIO builds, use nrf52840_dk.overlay instead.
- * This file is kept for reference and compatibility.
+ * Device tree overlay for nRF52840 Zephyr Companion
+ * USB HID and CDC ACM device configuration
  */
 
 / {

@@ -1,3 +1,7 @@
+# DEPRECATED: This file was used with the west build system.
+# For PlatformIO builds, use zephyr/CMakeLists.txt instead.
+# This file is kept for reference and compatibility.
+
 cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(nrf52840_zephyr_companion)

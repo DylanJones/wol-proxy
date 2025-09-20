@@ -70,33 +70,40 @@ python .github/tools/web_search.py --url https://example.com --raw --format json
 - Parses HTML with BeautifulSoup and strips typical non-content tags to derive readable text. This is a simple heuristic, not a full readability algorithm.
 - When `--query` is supplied, the text output is reduced to sentences containing the query to help agents pull relevant snippets.
 
-## Zephyr nRF52840 Companion Quickstart
+## nRF52840 Zephyr Companion Quickstart (PlatformIO)
 
-Use these steps to get the Zephyr-based nRF52840 companion building quickly:
+Use these steps to get the nRF52840 Zephyr companion building with PlatformIO:
 
-1. Ensure the Zephyr SDK and workspace are ready (the repo expects the SDK at `/opt/zephyr-sdk-0.17.1` and a Zephyr checkout at
-   `~/zephyrproject`). Install the Python tools if needed:
-
-   ```sh
-   pip install --user west pyelftools
-   ```
-
-2. Before building, source the Zephyr environment (needed for `west` to locate `ZEPHYR_BASE` and the SDK):
+1. Install PlatformIO and required tools:
 
    ```sh
-   source ~/zephyrproject/zephyr/zephyr-env.sh
+   pip install platformio
    ```
 
-3. Invoke the build from the repository root. The companion relies on `app.overlay` for its USB definitions, so pass it explicitly:
+2. Navigate to the companion directory and build:
 
    ```sh
-   west build -b nrf52840dk/nrf52840 nrf52840-zephyr-companion -p auto -- -DDTC_OVERLAY_FILE=app.overlay > build.log 2>&1
+   cd nrf52840-zephyr-companion
+   pio run
    ```
 
-   The generated image is `build/zephyr/zephyr.elf`. Review `build.log` if the build fails.
+   The generated image is `.pio/build/nrf52840_dk/firmware.elf`. The build process will automatically:
+   - Download the Nordic nRF52 platform
+   - Install the Zephyr framework 
+   - Configure OpenThread support
+   - Apply USB device tree overlays
 
-4. If you see undefined references to `otPlatRadio*`, double-check that `CONFIG_NET_L2_OPENTHREAD=y` remains in `prj.conf`; it pulls
-   in the required radio support.
+3. To upload to the device (requires Nordic Command Line Tools):
 
-5. Keep build artifacts out of version control—`build/` and `build.log` are already ignored via `.gitignore`.
+   ```sh
+   pio run --target upload
+   ```
+
+4. To monitor the device:
+
+   ```sh
+   pio device monitor --port /dev/ttyACM0 --baud 115200
+   ```
+
+5. Build artifacts are automatically managed by PlatformIO—the `.pio/` directory is already ignored via `.gitignore`.
 

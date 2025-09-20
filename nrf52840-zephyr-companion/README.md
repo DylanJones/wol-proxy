@@ -20,17 +20,59 @@ subsystem (NVS backend).
 
 ## Building
 
-1. Install the Zephyr SDK and dependencies (see repository `AGENTS.md` for the
-   quickest flow used in automation).
-2. Source Zephyr's environment setup, e.g. `source ~/zephyrproject/zephyr/zephyr-env.sh`.
-3. From the repository root run:
+This project now uses [PlatformIO](https://platformio.org/) with the Zephyr framework instead of west.
 
-```sh
-west build -b nrf52840dk_nrf52840 nrf52840-zephyr-companion
+### Prerequisites
+
+1. Install PlatformIO:
+   ```bash
+   pip install platformio
+   ```
+
+2. Install the Nordic nRF52 platform and Zephyr framework (PlatformIO will handle this automatically):
+
+### Building
+
+From the `nrf52840-zephyr-companion` directory:
+
+```bash
+# Build the project
+pio run
+
+# Build and upload to the device
+pio run --target upload
+
+# Clean build artifacts
+pio run --target clean
 ```
 
-The build outputs the ELF image under `build/zephyr/zephyr.elf`. Use `west flash`
-or your preferred Nordic programming tool.
+The build outputs will be in the `.pio/build/nrf52840_dk/` directory.
+
+### Alternative Build Commands
+
+```bash
+# Build for production
+pio run --environment nrf52840_dk
+
+# Monitor serial output
+pio device monitor --port /dev/ttyACM0 --baud 115200
+```
+
+## Configuration
+
+The project uses PlatformIO's Zephyr framework integration. Configuration is handled through:
+
+- `platformio.ini` - Main project configuration
+- `zephyr/prj.conf` - Zephyr-specific configuration options
+- `nrf52840_dk.overlay` - Device tree overlay for USB configuration
+
+### Customizing the Build
+
+To modify Zephyr configuration options, edit `zephyr/prj.conf`. Key configuration options include:
+
+- `CONFIG_OPENTHREAD_*` - Thread network parameters
+- `CONFIG_WOL_LISTEN_PORT` - Default UDP listen port (3389)
+- `CONFIG_WOL_USB_MAX_LINE` - Maximum command line length for CDC interface
 
 ## USB Commands (CDC ACM)
 
@@ -45,8 +87,8 @@ receives so it is easy to script.
 ## Thread Network
 
 This sample auto-attaches to a Thread network defined by the constants in
-`prj.conf`. Update `CONFIG_OPENTHREAD_*` values to match your deployment. If you
-prefer commissioning, enable the joiner in `prj.conf` and extend the CDC shell
+`zephyr/prj.conf`. Update `CONFIG_OPENTHREAD_*` values to match your deployment. If you
+prefer commissioning, enable the joiner in `zephyr/prj.conf` and extend the CDC shell
 or connect via the OpenThread CLI to supply credentials.
 
 ## Wake Logic
