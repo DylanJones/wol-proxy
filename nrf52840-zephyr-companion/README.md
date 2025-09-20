@@ -20,17 +20,20 @@ subsystem (NVS backend).
 
 ## Building
 
-1. Install the Zephyr SDK and dependencies (see repository `AGENTS.md` for the
-   quickest flow used in automation).
-2. Source Zephyr's environment setup, e.g. `source ~/zephyrproject/zephyr/zephyr-env.sh`.
-3. From the repository root run:
+The project uses [PlatformIO](https://platformio.org/) with the Zephyr
+framework package pinned to version 4.2.0.
+
+1. Install PlatformIO Core (`pip install platformio` or follow the PlatformIO
+   installation guide).
+2. From this directory run:
 
 ```sh
-west build -b nrf52840dk_nrf52840 nrf52840-zephyr-companion
+pio run
 ```
 
-The build outputs the ELF image under `build/zephyr/zephyr.elf`. Use `west flash`
-or your preferred Nordic programming tool.
+The resulting images are placed under `.pio/build/nrf52840dk/` (for example
+`firmware.elf` and `firmware.hex`). Use `pio run -t upload` or your preferred
+Nordic programming utility to flash the board.
 
 ## USB Commands (CDC ACM)
 

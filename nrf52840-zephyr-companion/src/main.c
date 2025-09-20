@@ -319,8 +319,12 @@ static int init_cdc(void)
     return 0;
 }
 
-static void udp_listener(void *, void *, void *)
+static void udp_listener(void *arg0, void *arg1, void *arg2)
 {
+    ARG_UNUSED(arg0);
+    ARG_UNUSED(arg1);
+    ARG_UNUSED(arg2);
+
     uint16_t active_port = 0;
     int sock = -1;
     struct sockaddr_in6 bind_addr = {0};
