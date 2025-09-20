@@ -10,9 +10,11 @@ machine is ready to serve them.
 ### `wol`
 
 `wol` listens on a TCP port and proxies incoming connections to a target
-machine. If the target machine is asleep the proxy first sends a Wake-on-LAN
-packet and waits for the machine to come online before forwarding the
-connection.
+machine. If the target machine is asleep the proxy wakes it before forwarding
+the connection. Two wake methods are supported:
+
+- Wake-on-LAN magic packet (default)
+- ESP32-S2 companion over UDP (USB HID mouse jiggle)
 
 Example:
 
@@ -21,7 +23,33 @@ wol-proxy wol --mac aa:bb:cc:dd:ee:ff --target 192.0.2.10:22 --bind 0.0.0.0:2222
 ```
 
 The above command exposes an SSH service on port `2222`. When a client connects
-it wakes the real server at `192.0.2.10` and then proxies the SSH session.
+it wakes the real server at `192.0.2.10` (default: WOL magic packet) and then
+proxies the SSH session.
+
+To use the ESP32-S2 companion instead (or alongside WOL):
+
+```bash
+# Wake using ESP32-S2 companion listening on UDP 3389
+wol-proxy wol \
+  --mac aa:bb:cc:dd:ee:ff \
+  --target 192.0.2.10:22 \
+  --bind 0.0.0.0:2222 \
+  --wake-method esp32 \
+  --esp32-addr 192.0.2.50:3389
+
+# Or send both WOL and ESP32 UDP in parallel
+wol-proxy wol \
+  --mac aa:bb:cc:dd:ee:ff \
+  --target 192.0.2.10:22 \
+  --bind 0.0.0.0:2222 \
+  --wake-method both \
+  --esp32-addr 192.0.2.50
+```
+
+Notes
+- `--esp32-addr` accepts `ip` or `ip:port` (defaults to port `3389`).
+- The ESP32-S2 companion firmware lives in `esp32s2-companion/`. See its
+  README for build and configuration instructions.
 
 ### `keepawake`
 

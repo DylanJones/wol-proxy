@@ -3,7 +3,7 @@
 //! the server has woken up.
 
 use anyhow::{bail, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use ping_rs::PingOptions;
 use std::{
     net::{IpAddr, SocketAddr, SocketAddrV4},
@@ -13,6 +13,13 @@ use std::{
 };
 use tokio::net::{TcpListener, TcpStream};
 use wake_on_lan::MagicPacket;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum WakeMethod {
+    Wol,
+    Esp32,
+    Both,
+}
 
 #[derive(Parser)]
 struct Args {
@@ -31,6 +38,14 @@ struct Args {
     #[clap(long, default_value = "15")]
     /// Maximum time to wait for the server to wake up in seconds
     timeout: u64,
+
+    #[clap(long, value_enum, default_value = "wol")]
+    /// Wake method to use when a connection arrives
+    wake_method: WakeMethod,
+
+    #[clap(long)]
+    /// ESP32-S2 companion IP[:port] for UDP wake (default port 3389)
+    esp32_addr: Option<String>,
 }
 
 /// Wait for the target to come online, timing out after the given
@@ -66,14 +81,28 @@ async fn handle_client(
     target_addr: &SocketAddr,
     mac: &[u8; 6],
     timeout: u64,
+    wake_method: WakeMethod,
+    esp32: Option<SocketAddr>,
 ) -> Result<()> {
     // Check if the server is already online, and skip WOL if it is:
     if !ping(&target_addr.ip(), Duration::from_secs(1)).await {
-        // Send the wake-on-lan packet to the server
-        let pkt = MagicPacket::new(mac);
-        let sa_any = SocketAddr::from_str("[::]:0").unwrap();
-        println!("Sending magic packet...");
-        pkt.send_to(target_addr, &sa_any)?;
+        match wake_method {
+            WakeMethod::Wol => {
+                send_wol(mac, target_addr)?;
+            }
+            WakeMethod::Esp32 => {
+                send_esp32(esp32)?;
+            }
+            WakeMethod::Both => {
+                // Fire both; don't error if one fails
+                if let Err(e) = send_wol(mac, target_addr) {
+                    eprintln!("WOL send error: {}", e);
+                }
+                if let Err(e) = send_esp32(esp32) {
+                    eprintln!("ESP32 send error: {}", e);
+                }
+            }
+        }
 
         // Wait for the server to wake up
         println!("Waiting for server to wake up...");
@@ -98,6 +127,37 @@ fn parse_mac(mac: &str) -> Result<[u8; 6]> {
         out[i] = u8::from_str_radix(&mac[3 * i..(3 * i) + 2], 16)?;
     }
     Ok(out)
+}
+
+fn parse_addr_with_default_port(s: &str, default_port: u16) -> Result<SocketAddr> {
+    // Accept ip:port or ip only (in which case apply default port)
+    if let Ok(sa) = SocketAddr::from_str(s) {
+        return Ok(sa);
+    }
+    // Try as bare IP
+    let ip = IpAddr::from_str(s)?;
+    Ok(SocketAddr::new(ip, default_port))
+}
+
+fn send_wol(mac: &[u8; 6], target_addr: &SocketAddr) -> Result<()> {
+    let pkt = MagicPacket::new(mac);
+    let sa_any = SocketAddr::from_str("[::]:0").unwrap();
+    println!("Sending magic packet...");
+    pkt.send_to(target_addr, &sa_any)?;
+    Ok(())
+}
+
+fn send_esp32(esp32: Option<SocketAddr>) -> Result<()> {
+    let addr = match esp32 {
+        Some(a) => a,
+        None => anyhow::bail!("ESP32 wake method selected but no --esp32-addr provided"),
+    };
+    // Send a single UDP datagram with token "WAKE"
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    sock.set_nonblocking(false)?;
+    let _ = sock.send_to(b"WAKE", addr)?;
+    println!("Sent ESP32 wake UDP to {}", addr);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -163,7 +223,7 @@ mod tests {
             let (stream, _) = proxy.accept().await.unwrap();
             let mac = [0, 1, 2, 3, 4, 5];
             // Use a short timeout since we're testing locally
-            if let Err(e) = handle_client(stream, &echo_addr, &mac, 1).await {
+            if let Err(e) = handle_client(stream, &echo_addr, &mac, 1, WakeMethod::Wol, None).await {
                 eprintln!("Handle client error: {}", e);
                 // For CI environments where ping might not work, we expect this to fail
                 // but we can still test that the function handles errors gracefully
@@ -191,6 +251,12 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn parse_addr_with_default_port_applies_port() {
+        let sa = parse_addr_with_default_port("127.0.0.1", 3389).unwrap();
+        assert_eq!(sa.port(), 3389);
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -203,11 +269,20 @@ async fn main() -> Result<()> {
     // split target address into ip/port:
     let target_addr = SocketAddrV4::from_str(&args.target)?;
 
+    let esp32_addr = match &args.esp32_addr {
+        Some(s) => Some(parse_addr_with_default_port(s, 3389)?),
+        None => None,
+    };
+
     let listener = TcpListener::bind(&args.bind).await?;
     loop {
         let (stream, _) = listener.accept().await?;
+        let mac = mac.clone();
+        let target_addr = target_addr.clone();
+        let wake_method = args.wake_method;
+        let esp32_addr = esp32_addr.clone();
         tokio::spawn(async move {
-            match handle_client(stream, &target_addr.into(), &mac, args.timeout).await {
+            match handle_client(stream, &target_addr.into(), &mac, args.timeout, wake_method, esp32_addr).await {
                 Ok(_) => {}
                 Err(e) => eprintln!("client handling error: {}", e),
             };

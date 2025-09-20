@@ -1,0 +1,52 @@
+[package]
+name = "xiao-embassy-hello"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+embassy-futures = { version = "0.1.2" }
+embassy-sync = { version = "0.7.2", features = ["defmt"] }
+embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "0.5.0", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-nrf = { version = "0.7.0", features = ["defmt", "nrf52840", "time-driver-rtc1", "gpiote", "unstable-pac", "time"] }
+embassy-net = { version = "0.7.1", features = ["defmt", "tcp", "dhcpv4", "medium-ethernet","udp", "medium-ieee802154", "proto-ipv6"] }
+embassy-usb = { version = "0.5.1", features = ["defmt"] }
+embedded-io = { version = "0.6.0", features = ["defmt-03"]  }
+embedded-io-async = { version = "0.6.1", features = ["defmt-03"] }
+embassy-net-esp-hosted = { version = "0.2.1", features = ["defmt"] }
+embassy-net-enc28j60 = { version = "0.2.1", features = ["defmt"] }
+
+defmt = "1.0.1"
+defmt-rtt = "1.0.0"
+
+fixed = "1.10.0"
+static_cell = { version = "2" }
+cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"] }
+cortex-m-rt = "0.7.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+rand = { version = "0.9.0", default-features = false }
+embedded-storage = "0.3.1"
+usbd-hid = "0.8.1"
+serde = { version = "1.0.136", default-features = false }
+embedded-hal = { version = "1.0" }
+embedded-hal-async = { version = "1.0" }
+embedded-hal-bus = { version = "0.1", features = ["async"] }
+# num-integer = { version = "0.1.45", default-features = false }
+# microfft = "0.5.0"
+
+[profile.release]
+codegen-units = 1
+opt-level = "s"
+debug = true
+lto = true
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+
+[package.metadata.cargo-embed]
+chip = "nrf52840"
+
+[workspace]
+members = []

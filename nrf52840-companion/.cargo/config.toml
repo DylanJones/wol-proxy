@@ -1,0 +1,21 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+runner = "probe-rs run --chip nrf52840" # optional; build doesn't require this installed
+rustflags = [
+  # Keep non-paged memory layout
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tlink.x",
+]
+
+[env]
+DEFMT_LOG = "info"
+
+[alias]
+# Build release for the embedded target
+b = ["build", "--release", "--target", "thumbv7em-none-eabihf"]
+
+# Generate BIN and UF2 using the local bash script
+uf2 = ["build", "--release", "--target", "thumbv7em-none-eabihf", "--message-format=json-diagnostic-rendered-ansi", "&&", "bash", "scripts/build-uf2.sh"]
+
