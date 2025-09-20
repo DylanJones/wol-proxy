@@ -8,7 +8,7 @@ LOG_MODULE_REGISTER(wol_usb_support, CONFIG_LOG_DEFAULT_LEVEL);
 #define WOL_USB_VID 0x1209
 #define WOL_USB_PID 0x0002
 #define WOL_USB_MANUFACTURER "WOL-Proxy"
-#define WOL_USB_PRODUCT "nRF52840 Zephyr Wake Mouse"
+#define WOL_USB_PRODUCT "Matter WOL Companion"
 
 static const char *const class_blocklist[] = {
     NULL,
