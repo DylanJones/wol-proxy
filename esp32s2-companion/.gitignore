@@ -1,5 +1,0 @@
-# Exclude any local secrets used for fallback config
-secrets.toml
-device-config.toml
-**/*target/
-
