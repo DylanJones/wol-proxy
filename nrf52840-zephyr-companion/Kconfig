@@ -1,0 +1,20 @@
+source "Kconfig.zephyr"
+
+menu "WOL Proxy Companion"
+
+config WOL_LISTEN_PORT
+    int "UDP port to trigger wake"
+    range 1 65535
+    default 3389
+    help
+      UDP port number that the firmware listens on for wake packets.
+
+config WOL_USB_MAX_LINE
+    int "Maximum bytes per CDC command"
+    range 16 512
+    default 120
+    help
+      Maximum number of bytes buffered from the USB CDC console before
+      the command processor attempts to parse a line.
+
+endmenu
