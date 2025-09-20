@@ -1,0 +1,16 @@
+/ {
+    hid_dev_0: hid_dev_0 {
+        compatible = "zephyr,hid-device";
+        label = "HID0";
+        protocol-code = "none";
+        in-polling-period-us = <1000>;
+        in-report-size = <64>;
+    };
+};
+
+&zephyr_udc0 {
+    cdc_acm_uart0: cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "CDC_ACM_0";
+    };
+};

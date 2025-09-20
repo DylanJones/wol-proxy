@@ -3,3 +3,5 @@
 *.uf2
 *.hex
 **/*/target
+build/
+build.log
