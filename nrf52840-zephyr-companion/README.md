@@ -36,6 +36,9 @@ This project now uses [PlatformIO](https://platformio.org/) with the Zephyr fram
 From the `nrf52840-zephyr-companion` directory:
 
 ```bash
+# Validate project setup
+python3 validate.py
+
 # Build the project
 pio run
 
