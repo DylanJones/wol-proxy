@@ -5,6 +5,8 @@
 use anyhow::{bail, Result};
 use clap::{Parser, ValueEnum};
 use ping_rs::PingOptions;
+use reqwest::Url;
+use serde::Serialize;
 use std::{
     net::{IpAddr, SocketAddr, SocketAddrV4},
     str::FromStr,
@@ -18,7 +20,9 @@ use wake_on_lan::MagicPacket;
 enum WakeMethod {
     Wol,
     Esp32,
+    HomeAssistant,
     Both,
+    WolAndHomeAssistant,
 }
 
 #[derive(Parser)]
@@ -46,6 +50,90 @@ struct Args {
     #[clap(long)]
     /// ESP32-S2 companion IP[:port] for UDP wake (default port 3389)
     esp32_addr: Option<String>,
+
+    #[clap(long)]
+    /// Base URL for the Home Assistant instance (e.g. http://homeassistant.local:8123)
+    home_assistant_url: Option<String>,
+
+    #[clap(long)]
+    /// Long-lived Home Assistant access token for service calls
+    home_assistant_token: Option<String>,
+
+    #[clap(long)]
+    /// Entity ID exposed by the Matter companion in Home Assistant
+    home_assistant_entity_id: Option<String>,
+
+    #[clap(long, default_value = "button.press")]
+    /// Home Assistant service to invoke when waking via the Matter companion (<domain>.<service>)
+    home_assistant_service: String,
+}
+
+#[derive(Clone, Debug)]
+struct HomeAssistantClient {
+    client: reqwest::Client,
+    endpoint: Url,
+    token: String,
+    entity_id: String,
+}
+
+#[derive(Serialize)]
+struct HomeAssistantServiceCall<'a> {
+    entity_id: &'a str,
+}
+
+impl HomeAssistantClient {
+    fn new(base_url: &str, service: &str, token: String, entity_id: String) -> Result<Self> {
+        if !service.contains('.') {
+            bail!("Home Assistant service must be in the form <domain>.<service>");
+        }
+        let mut parts = service.splitn(2, '.');
+        let domain = parts.next().unwrap();
+        let service = parts.next().unwrap();
+
+        let mut endpoint = Url::parse(base_url)?;
+        let mut segments: Vec<String> = endpoint
+            .path()
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| segment.to_string())
+            .collect();
+        segments.push("api".into());
+        segments.push("services".into());
+        segments.push(domain.to_string());
+        segments.push(service.to_string());
+
+        let path = format!("/{}", segments.join("/"));
+        endpoint.set_path(&path);
+        endpoint.set_query(None);
+        endpoint.set_fragment(None);
+        Ok(Self {
+            client: reqwest::Client::new(),
+            endpoint,
+            token,
+            entity_id,
+        })
+    }
+
+    async fn trigger(&self) -> Result<()> {
+        let response = self
+            .client
+            .post(self.endpoint.clone())
+            .bearer_auth(&self.token)
+            .json(&HomeAssistantServiceCall {
+                entity_id: &self.entity_id,
+            })
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            bail!(
+                "Home Assistant service call failed with status {}",
+                response.status()
+            );
+        }
+
+        Ok(())
+    }
 }
 
 /// Wait for the target to come online, timing out after the given
@@ -83,6 +171,7 @@ async fn handle_client(
     timeout: u64,
     wake_method: WakeMethod,
     esp32: Option<SocketAddr>,
+    home_assistant: Option<HomeAssistantClient>,
 ) -> Result<()> {
     // Check if the server is already online, and skip WOL if it is:
     if !ping(&target_addr.ip(), Duration::from_secs(1)).await {
@@ -93,6 +182,14 @@ async fn handle_client(
             WakeMethod::Esp32 => {
                 send_esp32(esp32)?;
             }
+            WakeMethod::HomeAssistant => {
+                let client = home_assistant.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Home Assistant wake method selected but configuration was not provided"
+                    )
+                })?;
+                client.trigger().await?;
+            }
             WakeMethod::Both => {
                 // Fire both; don't error if one fails
                 if let Err(e) = send_wol(mac, target_addr) {
@@ -100,6 +197,14 @@ async fn handle_client(
                 }
                 if let Err(e) = send_esp32(esp32) {
                     eprintln!("ESP32 send error: {}", e);
+                }
+            }
+            WakeMethod::WolAndHomeAssistant => {
+                send_wol(mac, target_addr)?;
+                if let Some(client) = home_assistant.as_ref() {
+                    client.trigger().await?;
+                } else {
+                    bail!("Home Assistant wake method selected but configuration was not provided");
                 }
             }
         }
@@ -168,6 +273,53 @@ mod tests {
         net::TcpListener,
     };
 
+    #[tokio::test]
+    async fn home_assistant_client_builds_endpoint() {
+        let client = HomeAssistantClient::new(
+            "http://localhost:8123",
+            "button.press",
+            "token".to_string(),
+            "button.server_wake".to_string(),
+        )
+        .expect("client to be created");
+
+        assert_eq!(
+            client.endpoint.as_str(),
+            "http://localhost:8123/api/services/button/press"
+        );
+    }
+
+    #[test]
+    fn home_assistant_client_respects_base_path() {
+        let client = HomeAssistantClient::new(
+            "http://localhost:8123/base/",
+            "button.press",
+            "token".to_string(),
+            "button.server_wake".to_string(),
+        )
+        .expect("client to be created");
+
+        assert_eq!(
+            client.endpoint.as_str(),
+            "http://localhost:8123/base/api/services/button/press"
+        );
+    }
+
+    #[tokio::test]
+    async fn home_assistant_client_rejects_invalid_service() {
+        let err = HomeAssistantClient::new(
+            "http://localhost:8123",
+            "invalid",
+            "token".to_string(),
+            "button.server_wake".to_string(),
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("Home Assistant service must be in the form"));
+    }
+
     #[test]
     fn parse_mac_parses_bytes() {
         let mac = parse_mac("aa:bb:cc:dd:ee:ff").unwrap();
@@ -198,7 +350,10 @@ mod tests {
                 return;
             }
         }
-        assert!(result, "Ping to localhost should succeed when ping is available");
+        assert!(
+            result,
+            "Ping to localhost should succeed when ping is available"
+        );
     }
 
     #[tokio::test]
@@ -223,7 +378,9 @@ mod tests {
             let (stream, _) = proxy.accept().await.unwrap();
             let mac = [0, 1, 2, 3, 4, 5];
             // Use a short timeout since we're testing locally
-            if let Err(e) = handle_client(stream, &echo_addr, &mac, 1, WakeMethod::Wol, None).await {
+            if let Err(e) =
+                handle_client(stream, &echo_addr, &mac, 1, WakeMethod::Wol, None, None).await
+            {
                 eprintln!("Handle client error: {}", e);
                 // For CI environments where ping might not work, we expect this to fail
                 // but we can still test that the function handles errors gracefully
@@ -238,7 +395,9 @@ mod tests {
             if client.write_all(b"ping").await.is_ok() {
                 let mut buf = [0u8; 4];
                 // Use a timeout to avoid hanging the test
-                match tokio::time::timeout(Duration::from_secs(2), client.read_exact(&mut buf)).await {
+                match tokio::time::timeout(Duration::from_secs(2), client.read_exact(&mut buf))
+                    .await
+                {
                     Ok(Ok(_)) => {
                         assert_eq!(&buf, b"ping");
                     }
@@ -267,25 +426,61 @@ async fn main() -> Result<()> {
     let mac = parse_mac(&args.mac)?;
 
     // split target address into ip/port:
-    let target_addr = SocketAddrV4::from_str(&args.target)?;
+    let target_addr_v4 = SocketAddrV4::from_str(&args.target)?;
+    let target_addr = SocketAddr::from(target_addr_v4);
 
     let esp32_addr = match &args.esp32_addr {
         Some(s) => Some(parse_addr_with_default_port(s, 3389)?),
         None => None,
     };
 
+    let home_assistant = match (
+        &args.home_assistant_url,
+        &args.home_assistant_token,
+        &args.home_assistant_entity_id,
+    ) {
+        (Some(url), Some(token), Some(entity)) => Some(HomeAssistantClient::new(
+            url,
+            &args.home_assistant_service,
+            token.clone(),
+            entity.clone(),
+        )?),
+        (None, None, None) => None,
+        _ => {
+            bail!("When configuring Home Assistant you must supply URL, token, and entity id")
+        }
+    };
+
+    if matches!(
+        args.wake_method,
+        WakeMethod::HomeAssistant | WakeMethod::WolAndHomeAssistant
+    ) && home_assistant.is_none()
+    {
+        bail!(
+            "Home Assistant wake method requires --home-assistant-url, --home-assistant-token, and --home-assistant-entity-id"
+        );
+    }
+
     let listener = TcpListener::bind(&args.bind).await?;
+    let timeout = args.timeout;
+    let wake_method = args.wake_method;
     loop {
         let (stream, _) = listener.accept().await?;
-        let mac = mac.clone();
-        let target_addr = target_addr.clone();
-        let wake_method = args.wake_method;
-        let esp32_addr = esp32_addr.clone();
+        let home_assistant_cfg = home_assistant.clone();
         tokio::spawn(async move {
-            match handle_client(stream, &target_addr.into(), &mac, args.timeout, wake_method, esp32_addr).await {
-                Ok(_) => {}
-                Err(e) => eprintln!("client handling error: {}", e),
-            };
+            if let Err(e) = handle_client(
+                stream,
+                &target_addr,
+                &mac,
+                timeout,
+                wake_method,
+                esp32_addr,
+                home_assistant_cfg,
+            )
+            .await
+            {
+                eprintln!("client handling error: {}", e);
+            }
         });
     }
 }

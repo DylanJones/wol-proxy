@@ -44,12 +44,38 @@ wol-proxy wol \
   --bind 0.0.0.0:2222 \
   --wake-method both \
   --esp32-addr 192.0.2.50
+
+# Or trigger the Matter companion through Home Assistant
+wol-proxy wol \
+  --mac aa:bb:cc:dd:ee:ff \
+  --target 192.0.2.10:22 \
+  --bind 0.0.0.0:2222 \
+  --wake-method home-assistant \
+  --home-assistant-url http://homeassistant.local:8123 \
+  --home-assistant-token "<long-lived-access-token>" \
+  --home-assistant-entity-id button.nrf52840_wake
+
+# Combine WOL and Home Assistant in parallel
+wol-proxy wol \
+  --mac aa:bb:cc:dd:ee:ff \
+  --target 192.0.2.10:22 \
+  --bind 0.0.0.0:2222 \
+  --wake-method wol-and-home-assistant \
+  --home-assistant-url http://homeassistant.local:8123 \
+  --home-assistant-token "<long-lived-access-token>" \
+  --home-assistant-entity-id button.nrf52840_wake
 ```
 
 Notes
 - `--esp32-addr` accepts `ip` or `ip:port` (defaults to port `3389`).
 - The ESP32-S2 companion firmware lives in `esp32s2-companion/`. See its
   README for build and configuration instructions.
+- The nRF52840 Matter companion firmware lives in
+  `nrf52840-zephyr-companion/`. Use `--home-assistant-url`,
+  `--home-assistant-token`, and `--home-assistant-entity-id` to point the proxy
+  at the Home Assistant instance controlling the Matter device.
+- `--home-assistant-service` defaults to `button.press`. Override it if your
+  Matter entity exposes a different domain/service pair.
 
 ### `keepawake`
 
