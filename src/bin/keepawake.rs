@@ -56,8 +56,8 @@ async fn supervisor(active_connections: Arc<AtomicU64>, ac_notify: Arc<Notify>, 
             };
 
             // Double-check active connections after waiting to avoid a race condition
-            if active_connections.load(Ordering::SeqCst) == 0
-                && locked {
+            if active_connections.load(Ordering::SeqCst) == 0 {
+                if locked {
                     println!("releasing wakelock");
                     // we have to do this cause there's a bug in keepawake
                     drop(_awake);
@@ -79,6 +79,7 @@ async fn supervisor(active_connections: Arc<AtomicU64>, ac_notify: Arc<Notify>, 
                     //     .create()?);
                     locked = false;
                 }
+            }
         }
     }
 }

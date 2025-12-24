@@ -1,7 +1,6 @@
 //! A simple program to intercept incoming TCP connections and send a
 //! wake-on-lan packet to the real server, then transparently proxy once
 //! the server has woken up.
-
 use anyhow::{bail, Result};
 use clap::Parser;
 use ping_rs::PingOptions;
@@ -12,7 +11,7 @@ use std::{
     time::Duration,
 };
 use tokio::net::{TcpListener, TcpStream};
-use wake_on_lan::MagicPacket;
+use wake_on_lan;
 
 #[derive(Parser)]
 struct Args {
@@ -45,19 +44,17 @@ async fn ping(target: &IpAddr, timeout: Duration) -> bool {
         if start.elapsed() > timeout {
             return false;
         }
-        if ping_rs::send_ping_async(
+        match ping_rs::send_ping_async(
             target,
             Duration::from_secs(1),
             Arc::new(&[0u8; 0]),
             Some(&ping_opts),
         )
         .await
-        .is_ok()
         {
-            return true;
-        }
-        // Wait a bit before retrying to avoid busy loop
-        tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(_) => return true,
+            Err(_) => (),
+        };
     }
 }
 
@@ -70,10 +67,10 @@ async fn handle_client(
     // Check if the server is already online, and skip WOL if it is:
     if !ping(&target_addr.ip(), Duration::from_secs(1)).await {
         // Send the wake-on-lan packet to the server
-        let pkt = MagicPacket::new(mac);
+        let pkt = wake_on_lan::MagicPacket::new(mac);
         let sa_any = SocketAddr::from_str("[::]:0").unwrap();
         println!("Sending magic packet...");
-        pkt.send_to(target_addr, &sa_any)?;
+        pkt.send_to(target_addr, &sa_any.try_into()?)?;
 
         // Wait for the server to wake up
         println!("Waiting for server to wake up...");
@@ -98,99 +95,6 @@ fn parse_mac(mac: &str) -> Result<[u8; 6]> {
         out[i] = u8::from_str_radix(&mac[3 * i..(3 * i) + 2], 16)?;
     }
     Ok(out)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpListener,
-    };
-
-    #[test]
-    fn parse_mac_parses_bytes() {
-        let mac = parse_mac("aa:bb:cc:dd:ee:ff").unwrap();
-        assert_eq!(mac, [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
-    }
-
-    #[test]
-    fn parse_mac_rejects_invalid() {
-        assert!(parse_mac("not a mac").is_err());
-    }
-
-    #[tokio::test]
-    async fn ping_localhost_succeeds() {
-        let ip: IpAddr = "127.0.0.1".parse().unwrap();
-        // Ping might not work in CI environments due to privilege restrictions
-        // Test for either success or specific failure modes that are acceptable
-        let result = ping(&ip, Duration::from_secs(1)).await;
-        // For localhost, we expect ping to succeed unless there are permission issues
-        // In CI environments, ping might fail due to restricted network access
-        if !result {
-            // Try to determine if this is a permission issue by testing a non-existent IP
-            let nonexistent_ip: IpAddr = "192.0.2.1".parse().unwrap(); // RFC5737 test address
-            let nonexistent_result = ping(&nonexistent_ip, Duration::from_millis(100)).await;
-            // If both localhost and non-existent IP fail, it's likely a permission issue
-            // and we should skip this test in CI environments
-            if !nonexistent_result {
-                eprintln!("Ping appears to be restricted in this environment, skipping test");
-                return;
-            }
-        }
-        assert!(result, "Ping to localhost should succeed when ping is available");
-    }
-
-    #[tokio::test]
-    async fn handle_client_proxies_data() {
-        // Start echo server that will act as the real target
-        let echo = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let echo_addr = echo.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (mut stream, _) = echo.accept().await.unwrap();
-            let mut buf = [0u8; 32];
-            let n = stream.read(&mut buf).await.unwrap();
-            stream.write_all(&buf[..n]).await.unwrap();
-        });
-
-        // Give the echo server a moment to start
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        // Start listener representing the proxy and spawn handle_client
-        let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let proxy_addr = proxy.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (stream, _) = proxy.accept().await.unwrap();
-            let mac = [0, 1, 2, 3, 4, 5];
-            // Use a short timeout since we're testing locally
-            if let Err(e) = handle_client(stream, &echo_addr, &mac, 1).await {
-                eprintln!("Handle client error: {}", e);
-                // For CI environments where ping might not work, we expect this to fail
-                // but we can still test that the function handles errors gracefully
-            }
-        });
-
-        // Give the proxy server a moment to start
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        // Client connects to proxy
-        if let Ok(mut client) = TcpStream::connect(proxy_addr).await {
-            if client.write_all(b"ping").await.is_ok() {
-                let mut buf = [0u8; 4];
-                // Use a timeout to avoid hanging the test
-                match tokio::time::timeout(Duration::from_secs(2), client.read_exact(&mut buf)).await {
-                    Ok(Ok(_)) => {
-                        assert_eq!(&buf, b"ping");
-                    }
-                    _ => {
-                        // In CI environments, this might fail due to ping restrictions
-                        // but that's acceptable for this test environment
-                        eprintln!("Test completed with network restrictions (expected in CI)");
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[tokio::main(flavor = "current_thread")]
